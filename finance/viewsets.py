@@ -10,7 +10,8 @@ import logging
 
 from .models import (
     Profile, IncomeSource, Expense, Account, ContributionPlan,
-    Security, Holding, Transaction, Assumptions, ProjectionRun, ProjectionYear
+    Security, Holding, Transaction, Assumptions, ProjectionRun, ProjectionYear,
+    AccountType
 )
 from .serializers import (
     ProfileSerializer, IncomeSourceSerializer, ExpenseSerializer,
@@ -63,7 +64,16 @@ class AccountViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Account.objects.filter(user=self.request.user)
+        qs = Account.objects.filter(user=self.request.user).prefetch_related('holdings__security')
+        # Filtering by type and type__in
+        req = self.request
+        type_filter = req.query_params.get('type')
+        type_in = req.query_params.get('type__in')
+        if type_filter:
+            qs = qs.filter(type=type_filter)
+        if type_in:
+            qs = qs.filter(type__in=[t.strip() for t in type_in.split(',') if t.strip()])
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

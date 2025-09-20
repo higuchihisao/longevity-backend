@@ -29,10 +29,11 @@ class RiskProfile(models.TextChoices):
 
 
 class AccountType(models.TextChoices):
-    CASH = "CASH", "Cash"
-    BROKERAGE = "BROKERAGE", "Brokerage / Taxable"
+    ETF_STOCKS = "ETF_STOCKS", "Acciones / ETF"
     RETIREMENT = "RETIREMENT", "Retirement / Tax-Advantaged"
-    OTHER = "OTHER", "Other"
+    BONDS = "BONDS", "Bonds"
+    FUNDS = "FUNDS", "Mutual Funds / Funds"
+    CASH = "CASH", "Cash"
 
 
 class ExpenseCategory(models.TextChoices):
@@ -189,11 +190,13 @@ class Expense(TimeStampedModel):
 class Account(TimeStampedModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="accounts")
     name = models.CharField(max_length=120)
-    type = models.CharField(max_length=16, choices=AccountType.choices, default=AccountType.BROKERAGE)
-    broker = models.CharField(max_length=120, blank=True, default="")
+    type = models.CharField(max_length=16, choices=AccountType.choices, default=AccountType.ETF_STOCKS)
+    broker = models.CharField(max_length=120)
     currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.PEN)
     opening_balance = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0.00"))
     current_balance = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0.00"))
+    expected_return_annual_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"), null=True, blank=True)
+    retirement_fund_type = models.CharField(max_length=64, null=True, blank=True)
 
     class Meta:
         unique_together = [("user", "name")]

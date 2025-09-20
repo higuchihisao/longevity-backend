@@ -2,7 +2,8 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
     User, Profile, IncomeSource, Expense, Account, ContributionPlan,
-    Security, Holding, Transaction, Assumptions, ProjectionRun, ProjectionYear
+    Security, Holding, Transaction, Assumptions, ProjectionRun, ProjectionYear,
+    AccountType
 )
 
 User = get_user_model()
@@ -63,23 +64,61 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
 
 class AccountSerializer(serializers.ModelSerializer):
+    computed_balance = serializers.SerializerMethodField()
+
     class Meta:
         model = Account
         fields = [
             'id', 'name', 'type', 'broker', 'currency',
-            'opening_balance', 'current_balance', 'created_at', 'updated_at'
+            'opening_balance', 'current_balance',
+            'expected_return_annual_pct', 'retirement_fund_type',
+            'computed_balance', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
-    def validate_opening_balance(self, value):
-        if value < 0:
-            raise serializers.ValidationError("Opening balance must be >= 0.")
-        return value
+    def get_computed_balance(self, obj):
+        if obj.type == AccountType.ETF_STOCKS:
+            total = sum(h.units * h.avg_unit_cost for h in obj.holdings.all())
+            return total
+        return None
 
-    def validate_current_balance(self, value):
-        if value < 0:
-            raise serializers.ValidationError("Current balance must be >= 0.")
-        return value
+    def validate(self, attrs):
+        # Required always
+        for field in ['name', 'currency', 'broker']:
+            if not attrs.get(field) and (self.instance is None or getattr(self.instance, field, None) in [None, '']):
+                raise serializers.ValidationError({field: 'This field is required.'})
+
+        account_type = attrs.get('type') or (self.instance.type if self.instance else None)
+
+        # Type-specific rules
+        if account_type in [AccountType.RETIREMENT, AccountType.BONDS, AccountType.FUNDS, AccountType.CASH]:
+            if attrs.get('expected_return_annual_pct') is None and (
+                self.instance is None or self.instance.expected_return_annual_pct is None
+            ):
+                raise serializers.ValidationError({'expected_return_annual_pct': 'This field is required for this account type.'})
+            if account_type == AccountType.RETIREMENT:
+                if not attrs.get('retirement_fund_type') and (
+                    self.instance is None or not getattr(self.instance, 'retirement_fund_type', None)
+                ):
+                    raise serializers.ValidationError({'retirement_fund_type': 'This field is required for retirement accounts.'})
+
+        if account_type == AccountType.ETF_STOCKS:
+            # Ignore or reject current_balance in payload
+            if 'current_balance' in attrs:
+                attrs.pop('current_balance', None)
+
+        return attrs
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.type == AccountType.ETF_STOCKS:
+            # Override current_balance with computed sum of holdings
+            total = sum(h.units * h.avg_unit_cost for h in instance.holdings.all())
+            data['current_balance'] = total
+            data['computed_balance'] = True
+        else:
+            data['computed_balance'] = False
+        return data
 
 
 class ContributionPlanSerializer(serializers.ModelSerializer):
@@ -166,8 +205,12 @@ class HoldingSerializer(serializers.ModelSerializer):
 
         if user is not None and account_id and security_id:
             # Ensure the account belongs to the current user
-            if not Account.objects.filter(id=account_id, user=user).exists():
+            account_qs = Account.objects.filter(id=account_id, user=user)
+            if not account_qs.exists():
                 raise serializers.ValidationError({'account_id': 'Account not found for current user.'})
+            account = account_qs.first()
+            if account.type != AccountType.ETF_STOCKS:
+                raise serializers.ValidationError({'detail': 'Holdings only allowed for ETF accounts.'})
 
             qs = Holding.objects.filter(account_id=account_id, security_id=security_id)
             if self.instance is not None:
