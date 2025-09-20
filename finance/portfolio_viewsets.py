@@ -62,6 +62,25 @@ class SecurityViewSet(viewsets.ModelViewSet):
         """Return securities for the authenticated user only"""
         return Security.objects.filter(user=self.request.user)
 
+    def create(self, request, *args, **kwargs):
+        """Idempotent create: reuse existing (user, ticker) instead of erroring."""
+        data = request.data.copy()
+        ticker = (data.get('ticker') or '').strip().upper()
+
+        if ticker:
+            existing = Security.objects.filter(user=request.user, ticker__iexact=ticker).first()
+            if existing:
+                serializer = self.get_serializer(existing)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+            data['ticker'] = ticker
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         """Set the user to the current user when creating a security"""
         serializer.save(user=self.request.user)
@@ -101,11 +120,31 @@ class HoldingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Return holdings for the authenticated user only"""
-        return Holding.objects.filter(user=self.request.user)
+        return Holding.objects.filter(account__user=self.request.user)
 
-    def perform_create(self, serializer):
-        """Set the user to the current user when creating a holding"""
-        serializer.save(user=self.request.user)
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        account_id = data.get('account_id')
+        security_id = data.get('security_id')
+
+        # Validate account ownership
+        try:
+            account = Account.objects.get(id=account_id, user=request.user)
+        except Account.DoesNotExist:
+            return Response({'account_id': 'Account not found for current user.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Idempotent: if holding exists for this (account, security), return it
+        if account_id and security_id:
+            existing = Holding.objects.filter(account_id=account_id, security_id=security_id).first()
+            if existing:
+                serializer = self.get_serializer(existing)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(account=account)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     @action(detail=False, methods=['get'])
     def portfolio_summary(self, request):

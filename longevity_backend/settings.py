@@ -30,6 +30,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_extensions',
 ]
@@ -179,8 +180,15 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
+# CSRF trusted origins for cookie-based flows
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only in development
 
+# Explicit headers allowed
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -188,6 +196,7 @@ CORS_ALLOW_HEADERS = [
     'content-type',
     'dnt',
     'origin',
+    'cookie',
     'user-agent',
     'x-csrftoken',
     'x-requested-with',

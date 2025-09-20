@@ -102,6 +102,30 @@ class SecuritySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    def validate_ticker(self, value):
+        # Normalize ticker to uppercase without surrounding spaces
+        if value is None:
+            return value
+        return value.strip().upper()
+
+    def validate(self, attrs):
+        # Gracefully enforce uniqueness of (user, ticker) to avoid 500 IntegrityError
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        # Use incoming ticker if present; otherwise fall back to instance ticker (updates)
+        ticker = attrs.get('ticker') or (self.instance.ticker if self.instance else None)
+
+        if user is not None and ticker:
+            qs = Security.objects.filter(user=user, ticker__iexact=ticker)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    'ticker': 'Security with this ticker already exists for the current user.'
+                })
+
+        return attrs
+
 
 class HoldingSerializer(serializers.ModelSerializer):
     security = SecuritySerializer(read_only=True)
@@ -131,6 +155,27 @@ class HoldingSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("Average unit cost must be >= 0.")
         return value
+
+    def validate(self, attrs):
+        # Prevent duplicate (account, security) pairs causing DB IntegrityError
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+
+        account_id = attrs.get('account_id') or (self.instance.account_id if self.instance else None)
+        security_id = attrs.get('security_id') or (self.instance.security_id if self.instance else None)
+
+        if user is not None and account_id and security_id:
+            # Ensure the account belongs to the current user
+            if not Account.objects.filter(id=account_id, user=user).exists():
+                raise serializers.ValidationError({'account_id': 'Account not found for current user.'})
+
+            qs = Holding.objects.filter(account_id=account_id, security_id=security_id)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError('Holding for this account and security already exists.')
+
+        return attrs
 
 
 class TransactionSerializer(serializers.ModelSerializer):

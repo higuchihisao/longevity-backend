@@ -36,10 +36,10 @@ urlpatterns = [
     path('api/test/accounts/', test_views.test_create_account, name='test-create-account'),
     
     # Authentication endpoints
-    path('api/auth/login/', auth_views.CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/auth/login/', auth_views.LoginView.as_view(), name='token_obtain_pair'),
     path('api/auth/register/', auth_views.register, name='register'),
-    path('api/auth/logout/', auth_views.logout, name='logout'),
-    path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/auth/logout/', auth_views.LogoutView.as_view(), name='logout'),
+    path('api/auth/refresh/', auth_views.RefreshView.as_view(), name='token_refresh'),
     path('api/auth/user/', auth_views.user_profile, name='user_profile'),
     path('api/auth/user/update/', auth_views.update_profile, name='update_profile'),
     

@@ -2,34 +2,55 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from .serializers import UserSerializer, ProfileSerializer
 from .models import Profile
 
 User = get_user_model()
 
 
-class CustomTokenObtainPairView(TokenObtainPairView):
-    """
-    Custom login view that returns user data along with tokens
-    """
+COOKIE_ACCESS = 'access_token'
+COOKIE_REFRESH = 'refresh_token'
+
+def _cookie_kwargs():
+    return dict(
+        httponly=True,
+        samesite='Lax',
+        secure=not settings.DEBUG,  # secure in prod
+        path='/'
+    )
+
+
+class LoginView(TokenObtainPairView):
+    """Login that returns tokens in JSON and sets httpOnly cookies."""
+    permission_classes = [AllowAny]
+
     def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
-        
-        if response.status_code == 200:
-            # Get user data
-            email = request.data.get('email')
-            try:
-                user = User.objects.get(email=email)
-                user_data = UserSerializer(user).data
-                response.data['user'] = user_data
-            except User.DoesNotExist:
-                pass
-        
-        return response
+        base_response = super().post(request, *args, **kwargs)
+        data = getattr(base_response, 'data', {}) or {}
+        access = data.get('access')
+        refresh = data.get('refresh')
+
+        # Attach user info for convenience
+        user_data = None
+        email = request.data.get('email')
+        try:
+            user = User.objects.get(email=email)
+            user_data = UserSerializer(user).data
+        except Exception:
+            user_data = None
+
+        resp = Response({'access': access, 'refresh': refresh, 'user': user_data}, status=base_response.status_code)
+        if access:
+            resp.set_cookie(COOKIE_ACCESS, access, **_cookie_kwargs())
+        if refresh:
+            resp.set_cookie(COOKIE_REFRESH, refresh, **_cookie_kwargs())
+        return resp
 
 
 @api_view(['POST'])
@@ -103,28 +124,39 @@ def register(request):
         )
 
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def logout(request):
-    """
-    Logout user by blacklisting the refresh token
-    """
-    try:
-        refresh_token = request.data.get('refresh')
-        if refresh_token:
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-            return Response({'message': 'Successfully logged out'}, status=status.HTTP_200_OK)
-        else:
-            return Response(
-                {'error': 'Refresh token is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-    except Exception as e:
-        return Response(
-            {'error': f'Logout failed: {str(e)}'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+class RefreshView(TokenRefreshView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        # Allow refresh via cookie when body not provided
+        if not request.data.get('refresh'):
+            cookie_refresh = request.COOKIES.get(COOKIE_REFRESH)
+            if cookie_refresh:
+                request.data['refresh'] = cookie_refresh
+
+        base_response = super().post(request, *args, **kwargs)
+        access = getattr(base_response, 'data', {}).get('access')
+        resp = Response({'access': access}, status=base_response.status_code)
+        if access:
+            resp.set_cookie(COOKIE_ACCESS, access, **_cookie_kwargs())
+        return resp
+
+
+class LogoutView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token_str = request.data.get('refresh') or request.COOKIES.get(COOKIE_REFRESH)
+        if token_str:
+            try:
+                token = RefreshToken(token_str)
+                token.blacklist()
+            except Exception:
+                pass
+        resp = Response(status=status.HTTP_204_NO_CONTENT)
+        resp.delete_cookie(COOKIE_ACCESS, path='/')
+        resp.delete_cookie(COOKIE_REFRESH, path='/')
+        return resp
 
 
 @api_view(['GET'])
