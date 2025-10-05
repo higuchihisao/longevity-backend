@@ -148,3 +148,4 @@ Thumbs.db
 
 # Logs
 *.log
+.last_access_token

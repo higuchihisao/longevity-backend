@@ -5,6 +5,7 @@ from . import viewsets
 from . import auth_views
 from . import portfolio_urls
 from . import test_views
+from . import agents
 
 # Create router and register viewsets
 router = routers.DefaultRouter()
@@ -50,5 +51,8 @@ urlpatterns = [
     path('api/projections/runs/<int:pk>/clone/', viewsets.ProjectionRunViewSet.as_view({'post': 'clone'}), name='clone-projection'),
     # - Resumen de "¿hasta qué edad alcanzo?"
     path('api/summary/longevity/', viewsets.longevity_summary, name='longevity-summary'),
+
+    # Agents endpoint (Assistants API)
+    path('api/projection-agent', agents.agents_projection_view, name='projection-agent'),
 ]
 
